@@ -7,6 +7,7 @@ use std::thread::sleep;
 use std::time::Duration;
 use notify_rust::Notification;
 use notify_rust::Timeout;
+use chrono::{DateTime, Local};
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -105,10 +106,21 @@ fn main() {
     println!("Memory cleanup trigger threshold: {} MB", config.trigger_threshold / 1024 / 1024);
     println!("Available memory recovery level: {} MB", config.recovery_threshold / 1024 / 1024);
 
+    let mut logged_memory = 0;
     loop {
         match get_available_memory() {
             Ok(memory) => {
-                println!("Available memory: {} MB", memory / 1024 / 1024);
+
+                let diff = if memory > logged_memory {
+                    memory - logged_memory
+                } else {
+                    logged_memory - memory
+                };
+
+                if (diff > 100 * 1024 * 1024) {
+                    println!("{} Memory available: {} MB", Local::now().format("%Y-%m-%d %H:%M:%S.%3f").to_string(), memory / 1024 / 1024);
+                    logged_memory = memory;
+                };
 
                 if memory < config.trigger_threshold {
                     println!("Starting to free memory");
