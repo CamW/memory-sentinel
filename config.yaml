@@ -1,5 +1,11 @@
 trigger_threshold: 314572800 # 300 MB
 recovery_threshold: 2621440000 # 2500 MB
-process_patterns:
-  - chrome
 sleep_interval_secs: 1 # 1 second
+process_patterns:
+  - name: Chrome
+    pattern: (chrome)
+    report_match: false # Either the first match group can be reported or the pattern name
+
+  - name: FireFox
+    pattern: (firefox)
+    report_match: false

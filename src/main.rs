@@ -7,14 +7,20 @@ use std::thread::sleep;
 use std::time::Duration;
 use notify_rust::Notification;
 use notify_rust::Timeout;
-use chrono::{DateTime, Local};
 
 #[derive(Debug, Deserialize)]
 struct Config {
     trigger_threshold: u64,
     recovery_threshold: u64,
-    process_patterns: Vec<String>,
+    process_patterns: Vec<ProcessPattern>,
     sleep_interval_secs: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProcessPattern {
+    name: String,
+    pattern: String,
+    report_match: bool
 }
 
 fn get_available_memory() -> Result<u64, String> {
@@ -40,44 +46,58 @@ fn get_available_memory() -> Result<u64, String> {
     Err("Failed to parse memory information".to_string())
 }
 
-fn kill_processes_until_recovery(regex_patterns: &[String], recovery_threshold: u64) {
+fn kill_processes_until_recovery(patterns: &[ProcessPattern], recovery_threshold: u64) {
     let mut available_memory = get_available_memory().unwrap_or(0);
+    let re_split = Regex::new(r"\W+").unwrap();
 
     while available_memory < recovery_threshold {
-        for pattern in regex_patterns {
+        for pattern in patterns {
             
-            let mut re_found = false;
-            let re = Regex::new(pattern).unwrap();
-
-            println!("checking pattern: {}", pattern);
+            let re = Regex::new(&pattern.pattern).unwrap();
 
             let output = Command::new("ps")
                 .arg("-eo")
-                .arg("pid,command")
+                .arg("pid,rss,command")
                 .output()
                 .expect("Failed to execute command");
 
             let output_str = String::from_utf8_lossy(&output.stdout);
 
+            let mut re_found = false;
+
             for line in output_str.lines().skip(1) {
-                let fields: Vec<&str> = line.trim().splitn(2, ' ').collect();
-                let (pid, command) = (fields[0], fields[1]);
+                let fields: Vec<&str> = re_split.splitn(line.trim(), 3).collect();
+                let (pid, rss_str, command) = (fields[0], fields[1], fields[2]);
+                let rss: u64 = rss_str.parse().expect("Not a valid number");
 
                 if re.is_match(command) {
-                    println!("Killing process {} - {}", pid, command);
+
+                    re_found = true;
+
+                    let kill_target: String = if pattern.report_match { 
+                        re.captures(command)
+                            .and_then(|cap| cap.get(1))
+                            .map(|m| m.as_str().to_string())
+                            .unwrap_or_else(|| pattern.name.to_string())
+                    } else { 
+                        pattern.name.to_string()
+                    };
+
+                    println!("Killing process {}: {} holding {} MB", pid, kill_target, rss / 1024);
                     let status = Command::new("kill")
                         .arg(pid)
                         .status()
-                        .expect("Failed to execute command");
+                        .expect(&format!("Failed to kill process {}: {}", pid, kill_target));
                     if status.success() {
-                        re_found = true;
                         Notification::new()
                             .summary("MemSen - Process Killed")
-                            .body("Process was killed to protect memory availability.")
+                            .body(&format!("{} ({}) process was killed to protect memory availability.", kill_target, pid))
                             .timeout(Timeout::Never)
-                            .image_path("./img/kill_process.png")
-                            .show();
-                        sleep(Duration::from_secs(2));
+                            .show()
+                            .expect("Failed to show process-killed notification");
+                        sleep(Duration::from_secs(4));
+                        available_memory = get_available_memory().unwrap_or(0);
+                        println!("Memory available after process killed: {} MB", available_memory / 1024 / 1024);
                     }
                 }
                 if available_memory > recovery_threshold {
@@ -86,11 +106,20 @@ fn kill_processes_until_recovery(regex_patterns: &[String], recovery_threshold: 
                 }
             }
             if !re_found {
-                println!("Could not find / kill process - {}", pattern);
-                return;
+                println!("Could not find process for pattern: {}", pattern.name);
             }
 
             available_memory = get_available_memory().unwrap_or(0);
+        }
+        sleep(Duration::from_secs(7));
+        available_memory = get_available_memory().unwrap_or(0);
+        if available_memory < recovery_threshold {
+            Notification::new()
+                .summary("MemSen - Free Failed!")
+                .body(&format!("Target: {} MB, Current: {} MB. Unable to reduce usage below threashold.", recovery_threshold / 1024 / 1024, available_memory / 1024 / 1024))
+                .timeout(Timeout::Never)
+                .show()
+                .expect("Failed to show process-killed notification");
         }
     }
 }
@@ -117,15 +146,15 @@ fn main() {
                     logged_memory - memory
                 };
 
-                if (diff > 100 * 1024 * 1024) {
-                    println!("{} Memory available: {} MB", Local::now().format("%Y-%m-%d %H:%M:%S.%3f").to_string(), memory / 1024 / 1024);
+                if diff > 100 * 1024 * 1024 {
+                    println!("Memory available: {} MB", memory / 1024 / 1024);
                     logged_memory = memory;
                 };
 
                 if memory < config.trigger_threshold {
-                    println!("Starting to free memory");
+                    println!("Memory low! ({} MB), freeing", memory / 1024 / 1024);
                     kill_processes_until_recovery(&config.process_patterns, config.recovery_threshold);
-                    println!("Stopped memory freeing");
+                    println!("Stopped freeing memory");
                 }
             }
             Err(err) => {

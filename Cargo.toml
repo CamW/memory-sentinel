@@ -11,4 +11,3 @@ regex = "1.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 notify-rust = "4"
-chrono = "0.4"
