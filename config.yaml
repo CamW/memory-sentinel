@@ -1,0 +1,5 @@
+trigger_threshold: 314572800 # 300 MB
+recovery_threshold: 2621440000 # 2500 MB
+process_patterns:
+  - chrome
+sleep_interval_secs: 1 # 1 second
