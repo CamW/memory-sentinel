@@ -1,0 +1,9 @@
+[Unit]
+Description=Memory Sentinel
+
+[Service]
+ExecStart=/usr/bin/memory-sentinel/memory-sentinel
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

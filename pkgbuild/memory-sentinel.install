@@ -1,0 +1,9 @@
+pre_remove() {
+    echo "Stopping and disabling memory-sentinel.service..."
+    systemctl stop memory-sentinel.service
+    systemctl disable memory-sentinel.service
+}
+
+post_remove() {
+    echo "memory-sentinel.service stopped and disabled."
+}
